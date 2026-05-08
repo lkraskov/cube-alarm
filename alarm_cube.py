@@ -38,7 +38,7 @@ class CubeWatch:
                     alert_text = (
                         "🟦🟧 **movement**\n"
                         "🟨🟩 **detected!**\n"
-                        f" `{rssi} dBm` 📶"
+                        f" `{rssi} dBm` 📶 "
                     )
                     
                     await bot.send_message(
