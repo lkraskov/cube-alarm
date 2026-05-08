@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 from datetime import datetime
 from bleak import BleakScanner
 from aiogram import Bot
@@ -15,7 +16,45 @@ TIMEOUT  = int(os.getenv("ANTISPAM_TIMEOUT", 20))
 
 bot = Bot(token=TG_TOKEN)
 
+import random  # Не забудь добавить этот импорт в самое начало файла!
+
 class CubeWatch:
+    def __init__(self):
+        self.last_alert = 0
+        self.loop = asyncio.get_running_loop()
+        # Цвета кубика Рубика: белый, желтый, красный, оранжевый, синий, зеленый
+        self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
+
+    async def handle_detection(self, device, adv_data):
+        if device.address.upper() == ADDRESS:
+            current_time = self.loop.time()
+            
+            if current_time - self.last_alert > TIMEOUT:
+                self.last_alert = current_time
+                now = datetime.now().strftime("%H:%M:%S")
+                rssi = adv_data.rssi
+                
+                # Генерируем 4 случайных эмодзи из списка
+                c = random.sample(self.cube_colors, k=4)
+                
+                print(f"[{now}] 🚨 ТРЕВОГА! Сигнал: {rssi} dBm")
+                
+                try:
+                    # Собираем сообщение с рандомными квадратиками
+                    alert_text = (
+                        f"{c[0]}{c[1]} **movement**\n"
+                        f"{c[2]}{c[3]} **detected!**\n"
+                        f" `{rssi} dBm` 📶 "
+                    )
+                    
+                    await bot.send_message(
+                        chat_id=USER_ID, 
+                        text=alert_text, 
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    print(f"Ошибка TG: {e}")
+                    
     def __init__(self):
         self.last_alert = 0
         self.loop = asyncio.get_running_loop()
