@@ -1,0 +1,4 @@
+bleak
+aiogram
+python-dotenv
+pycryptodome
