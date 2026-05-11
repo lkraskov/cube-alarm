@@ -6,7 +6,6 @@ from bleak import BleakScanner
 from aiogram import Bot
 from dotenv import load_dotenv
 
-# Подгружаем конфиг
 load_dotenv()
 
 TG_TOKEN = os.getenv("TG_TOKEN")
@@ -20,6 +19,7 @@ class CubeWatch:
     def __init__(self):
         self.last_alert = 0
         self.loop = asyncio.get_running_loop()
+        # Список цветов
         self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
 
     async def handle_detection(self, device, adv_data):
@@ -28,16 +28,12 @@ class CubeWatch:
             now = datetime.now().strftime("%H:%M:%S")
             rssi = adv_data.rssi
             
-            # ЛОГИРУЕМ КАЖДЫЙ ПАКЕТ В КОНСОЛЬ
-            # Это поможет увидеть интенсивность сигналов
-            print(f"[{now}] Пакет от куба: {rssi} dBm | Data: {adv_data.manufacturer_data}")
+            # Логируем каждый пакет, чтобы понять поведение куба
+            print(f"[{now}] Пакет: {rssi} dBm | Data: {adv_data.manufacturer_data}")
 
-            # ТРЕВОГА ТОЛЬКО ПО ТАЙМ-АУТУ
             if current_time - self.last_alert > TIMEOUT:
                 self.last_alert = current_time
-                
                 c = random.sample(self.cube_colors, k=4)
-                print(f"[{now}] 🚨 ОТПРАВКА ТРЕВОГИ В ТГ!")
                 
                 try:
                     alert_text = (
@@ -46,48 +42,9 @@ class CubeWatch:
                         f" `{rssi} dBm` 📶 "
                     )
                     await bot.send_message(chat_id=USER_ID, text=alert_text, parse_mode="Markdown")
+                    print(f"[{now}] 🚨 Тревога отправлена!")
                 except Exception as e:
                     print(f"Ошибка TG: {e}")
-
-                    
-    def __init__(self):
-        self.last_alert = 0
-        self.loop = asyncio.get_running_loop()
-        # Цвета кубика Рубика: белый, желтый, красный, оранжевый, синий, зеленый
-        self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
-
-    async def handle_detection(self, device, adv_data):
-        if device.address.upper() == ADDRESS:
-            current_time = self.loop.time()
-            
-            if current_time - self.last_alert > TIMEOUT:
-                self.last_alert = current_time
-                now = datetime.now().strftime("%H:%M:%S")
-                rssi = adv_data.rssi
-                
-                # Рандомим 4 цвета
-                c = random.sample(self.cube_colors, k=4)
-                
-                print(f"[{now}] 🚨 ТРЕВОГА! Сигнал: {rssi} dBm")
-                
-                try:
-                    alert_text = (
-                        f"{c[0]}{c[1]} **movement**\n"
-                        f"{c[2]}{c[3]} **detected!**\n"
-                        f" `{rssi} dBm` 📶 "
-                    )
-                    
-                    await bot.send_message(
-                        chat_id=USER_ID, 
-                        text=alert_text, 
-                        parse_mode="Markdown"
-                    )
-                except Exception as e:
-                    print(f"Ошибка TG: {e}")
-
-    def __init__(self):
-        self.last_alert = 0
-        self.loop = asyncio.get_running_loop()
 
 async def main():
     if not TG_TOKEN or USER_ID == 0:
@@ -98,11 +55,7 @@ async def main():
     print(f"Цель: {ADDRESS} | Тайм-аут: {TIMEOUT}с")
 
     watcher = CubeWatch()
-    
-    scanner = BleakScanner(
-        detection_callback=watcher.handle_detection,
-        scanning_mode="active"
-    )
+    scanner = BleakScanner(detection_callback=watcher.handle_detection, scanning_mode="active")
 
     try:
         await scanner.start()
