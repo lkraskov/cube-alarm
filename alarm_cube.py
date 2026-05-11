@@ -38,6 +38,39 @@ class CubeWatch:
         self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
 
     async def handle_detection(self, device, adv_data):
+        # Логируем ВООБЩЕ ВСЕ устройства рядом, чтобы понять, живой ли сканер
+        # (Потом удалим, если слишком много мусора)
+        # print(f"DEBUG: Вижу {device.address}") 
+
+        if device.address.upper() == ADDRESS:
+            raw_data = adv_data.manufacturer_data.get(1)
+            now = datetime.now().strftime("%H:%M:%S")
+            rssi = adv_data.rssi
+
+            if not raw_data:
+                print(f"[{now}] 📡 Пакет от куба БЕЗ данных (RSSI: {rssi})")
+                return
+
+            # Декодируем для истории
+            decrypted_hex = decode_gan_adv(raw_data, ADDRESS)
+            
+            # ВЫВОДИМ В КОНСОЛЬ КАЖДЫЙ ПАКЕТ БЕЗ ИСКЛЮЧЕНИЯ
+            print(f"[{now}] 📥 ПАКЕТ ПОЛУЧЕН! RSSI: {rssi} | Hex: {decrypted_hex[:30]}")
+
+            # А это уже логика для уведомлений в ТГ (с антиспамом)
+            current_time = self.loop.time()
+            if decrypted_hex != self.last_data:
+                self.last_data = decrypted_hex
+                
+                if current_time - self.last_alert > TIMEOUT:
+                    self.last_alert = current_time
+                    print(f"[{now}] 🚨 Отправляю алерт в Telegram...")
+                    try:
+                        c = random.sample(self.cube_colors, k=4)
+                        alert_text = f"{c[0]}{c[1]} **Activity**\n`{rssi} dBm` 📶"
+                        await bot.send_message(chat_id=USER_ID, text=alert_text, parse_mode="Markdown")
+                    except Exception as e:
+                        print(f"Ошибка ТГ: {e}")
         if device.address.upper() == ADDRESS:
             raw_data = adv_data.manufacturer_data.get(1)
             if not raw_data:
