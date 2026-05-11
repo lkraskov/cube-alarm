@@ -82,6 +82,31 @@ async def main():
     
     while True:
         try:
+            print(f"Ищу кубик {ADDRESS}...")
+            # Сначала сканируем, чтобы "проснуться"
+            device = await BleakScanner.find_device_by_address(ADDRESS, timeout=10.0)
+            
+            if not device:
+                print(f"🤔 Куб не найден. Тряхни его! Реконнект...")
+                await asyncio.sleep(2)
+                continue
+
+            print(f"✅ Нашел! Подключаюсь к {device.name}...")
+            async with BleakClient(device, timeout=15.0) as client:
+                print("🔒 Коннект стабилен! Жду движений...")
+                await client.start_notify(NOTIFY_UUID, guard.notify_handler)
+                
+                while client.is_connected:
+                    await asyncio.sleep(1)
+                    
+        except Exception as e:
+            print(f"🔴 Ошибка: {e}. Сплю 5 сек...")
+            await asyncio.sleep(5)
+    guard = CubeGuard()
+    print(f"--- ОХРАНА ЗАПУЩЕНА (РЕЖИМ КЛИЕНТА) ---")
+    
+    while True:
+        try:
             print(f"Попытка подключения к {ADDRESS}...")
             async with BleakClient(ADDRESS, timeout=15.0) as client:
                 print("✅ Подключено! Жду движений...")
