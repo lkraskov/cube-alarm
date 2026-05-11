@@ -20,7 +20,40 @@ class CubeWatch:
     def __init__(self):
         self.last_alert = 0
         self.loop = asyncio.get_running_loop()
-        # Цвета кубика Рубика
+        self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
+
+    async def handle_detection(self, device, adv_data):
+        if device.address.upper() == ADDRESS:
+            current_time = self.loop.time()
+            now = datetime.now().strftime("%H:%M:%S")
+            rssi = adv_data.rssi
+            
+            # ЛОГИРУЕМ КАЖДЫЙ ПАКЕТ В КОНСОЛЬ
+            # Это поможет увидеть интенсивность сигналов
+            print(f"[{now}] Пакет от куба: {rssi} dBm | Data: {adv_data.manufacturer_data}")
+
+            # ТРЕВОГА ТОЛЬКО ПО ТАЙМ-АУТУ
+            if current_time - self.last_alert > TIMEOUT:
+                self.last_alert = current_time
+                
+                c = random.sample(self.cube_colors, k=4)
+                print(f"[{now}] 🚨 ОТПРАВКА ТРЕВОГИ В ТГ!")
+                
+                try:
+                    alert_text = (
+                        f"{c[0]}{c[1]} **movement**\n"
+                        f"{c[2]}{c[3]} **detected!**\n"
+                        f" `{rssi} dBm` 📶 "
+                    )
+                    await bot.send_message(chat_id=USER_ID, text=alert_text, parse_mode="Markdown")
+                except Exception as e:
+                    print(f"Ошибка TG: {e}")
+
+                    
+    def __init__(self):
+        self.last_alert = 0
+        self.loop = asyncio.get_running_loop()
+        # Цвета кубика Рубика: белый, желтый, красный, оранжевый, синий, зеленый
         self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
 
     async def handle_detection(self, device, adv_data):
@@ -51,6 +84,13 @@ class CubeWatch:
                     )
                 except Exception as e:
                     print(f"Ошибка TG: {e}")
+<<<<<<< HEAD
+
+    def __init__(self):
+        self.last_alert = 0
+        self.loop = asyncio.get_running_loop()
+=======
+>>>>>>> 0c913a2c409abb723ab80b532be7718c7ef5fb63
 
 async def main():
     if not TG_TOKEN or USER_ID == 0:
