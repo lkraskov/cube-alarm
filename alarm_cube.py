@@ -33,31 +33,34 @@ def decode_gan_adv(data, mac):
 class CubeWatch:
     def __init__(self):
         self.last_alert = 0
-        self.last_move_count = -1
+        self.last_data = None
         self.loop = asyncio.get_running_loop()
         self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
 
-    async def handle_detection(self, device, adv_data):
+async def handle_detection(self, device, adv_data):
         if device.address.upper() == ADDRESS:
-            # GAN кладет данные в manufacturer_data под ID 1
             raw_data = adv_data.manufacturer_data.get(1)
             if not raw_data:
                 return
 
-            # Декодируем!
-            move_count, state_hex = decode_gan_adv(raw_data, ADDRESS)
+            # Декодируем весь пакет
+            _, decrypted_hex = decode_gan_adv(raw_data, ADDRESS)
             
             current_time = self.loop.time()
             now = datetime.now().strftime("%H:%M:%S")
 
-            # Проверяем, изменился ли счетчик ходов
-            if move_count == self.last_move_count:
+            # Сравниваем ВЕСЬ дешифрованный пакет с предыдущим
+            if decrypted_hex == self.last_data:
                 return
 
-            self.last_move_count = move_count
+            self.last_data = decrypted_hex
             rssi = adv_data.rssi
             
-            print(f"[{now}] 🎯 Ход №{move_count}! (Raw: {state_hex[:20]}...)")
+            # Попробуем вытащить ход из 12-го или 13-го байта для наглядности
+            dec_bytes = bytes.fromhex(decrypted_hex)
+            move_val = dec_bytes[12] if len(dec_bytes) > 12 else dec_bytes[-1]
+
+            print(f"[{now}] ❗ Движение! MoveByte: {move_val} | Hex: {decrypted_hex[:30]}...")
 
             if current_time - self.last_alert > TIMEOUT:
                 self.last_alert = current_time
@@ -65,8 +68,8 @@ class CubeWatch:
                 
                 try:
                     alert_text = (
-                        f"{c[0]}{c[1]} **CUBE MOVED!**\n"
-                        f"{c[2]}{c[3]} **Move count: {move_count}**\n"
+                        f"{c[0]}{c[1]} **CUBE SENSORS CHANGED**\n"
+                        f"{c[2]}{c[3]} **Data detected!**\n"
                         f" `{rssi} dBm` 📶 "
                     )
                     await bot.send_message(chat_id=USER_ID, text=alert_text, parse_mode="Markdown")
