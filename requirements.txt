@@ -1,4 +1,5 @@
+lzstring
+pycryptodome
 bleak
 aiogram
 python-dotenv
-pycryptodome
