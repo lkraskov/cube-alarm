@@ -37,7 +37,7 @@ class CubeWatch:
         self.loop = asyncio.get_running_loop()
         self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
 
-async def handle_detection(self, device, adv_data):
+    async def handle_detection(self, device, adv_data):
         if device.address.upper() == ADDRESS:
             raw_data = adv_data.manufacturer_data.get(1)
             if not raw_data:
