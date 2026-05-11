@@ -84,13 +84,10 @@ class CubeWatch:
                     )
                 except Exception as e:
                     print(f"Ошибка TG: {e}")
-<<<<<<< HEAD
 
     def __init__(self):
         self.last_alert = 0
         self.loop = asyncio.get_running_loop()
-=======
->>>>>>> 0c913a2c409abb723ab80b532be7718c7ef5fb63
 
 async def main():
     if not TG_TOKEN or USER_ID == 0:
