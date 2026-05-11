@@ -81,16 +81,25 @@ async def main():
         print("❌ Ошибка: Проверь .env")
         return
 
-    print(f"--- ОХРАНА С ДЕКОДЕРОМ ЗАПУЩЕНА ---")
-    print(f"Цель: {ADDRESS} | MAC-Key: {ADDRESS.replace(':', '')}")
-
+    print(f"--- ОХРАНА ЗАПУЩЕНА (АГРЕССИВНЫЙ РЕЖИМ) ---")
     watcher = CubeWatch()
-    scanner = BleakScanner(detection_callback=watcher.handle_detection, scanning_mode="active")
+    
+    # Используем BlueZ бэкенд напрямую для Raspberry Pi
+    scanner = BleakScanner(
+        detection_callback=watcher.handle_detection,
+        scanning_mode="active",
+        # Это заставит BlueZ отдавать пакеты чаще
+    )
 
     try:
         await scanner.start()
+        print("Сканирование начато...")
         while True:
+            # Если куб "засыпает", можно попробовать рестартить сканер каждые 60 сек
+            # но пока просто дадим ему работать
             await asyncio.sleep(1)
+    except Exception as e:
+        print(f"Критическая ошибка сканера: {e}")
     finally:
         await scanner.stop()
         await bot.session.close()
