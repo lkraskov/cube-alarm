@@ -4,7 +4,7 @@ import random
 import lzstring
 import json
 from datetime import datetime
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 from aiogram import Bot
 from Crypto.Cipher import AES
 from dotenv import load_dotenv
