@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Конфиг
+# Конфиг из .env
 TG_TOKEN = os.getenv("TG_TOKEN")
 USER_ID  = int(os.getenv("USER_ID", 0))
 ADDRESS  = os.getenv("CUBE_ADDRESS", "AB:12:34:5D:32:6D").upper()
@@ -20,7 +20,7 @@ TIMEOUT  = int(os.getenv("ANTISPAM_TIMEOUT", 20))
 
 bot = Bot(token=TG_TOKEN)
 
-# Ключи GAN
+# Ключи дешифровки GAN
 KEYS = [
     "NoRgnAHANATADDWJYwMxQOxiiEcfYgSK6Hpr4TYCs0IG1OEAbDszALpA",
     "NoNg7ANATFIQnARmogLBRUCs0oAYN8U5J45EQBmFADg0oJAOSlUQF0g",
@@ -55,6 +55,7 @@ class CubeGuard:
         self.last_alert = 0
         self.white_solved = False
         self.key, self.iv = make_key_iv(ADDRESS)
+        # Цвета для дизайна
         self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
         print(f"Ключи созданы для {ADDRESS}")
 
@@ -64,25 +65,30 @@ class CubeGuard:
         mode = int(bits[0:4], 2)
         now_ts = asyncio.get_event_loop().time()
 
-        # Детекция движения
+        # Режим 2: Поворот грани
         if mode == 2:
             if now_ts - self.last_alert > TIMEOUT:
                 self.last_alert = now_ts
                 c = random.sample(self.cube_colors, k=4)
-                # Дизайн с уровнем сигнала как ты просил
+                # Дизайн как на твоих скринах
                 text = (
                     f"{c[0]}{c[1]} movement\n"
                     f"{c[2]}{c[3]} detected!\n"
                     f" `-88 dBm` 📶"
                 )
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 Движение!")
-                await bot.send_message(chat_id=USER_ID, text=text, parse_mode="Markdown")
+                try:
+                    await bot.send_message(chat_id=USER_ID, text=text, parse_mode="Markdown")
+                except Exception as e:
+                    print(f"Ошибка ТГ: {e}")
 
-        # Проверка белой грани
+        # Режим 4: Состояние куба
         elif mode == 4:
+            # Извлекаем состояние всех 54 наклеек
             facelets = [int(bits[16 + i*3 : 19 + i*3], 2) for i in range(54)]
-            # Первые 9 элементов (0-8) — обычно белая грань. Индекс белого цвета — 0.
-            if len(set(facelets[0:9])) == 1 and facelets[0] == 0:
+            # Проверяем первые 9 (белая грань). 0 - обычно белый цвет.
+            white_side = facelets[0:9]
+            if len(set(white_side)) == 1 and white_side[0] == 0:
                 if not self.white_solved:
                     self.white_solved = True
                     print("⚪ Белая грань собрана!")
@@ -96,20 +102,24 @@ async def main():
     
     while True:
         try:
-            print(f"Ищу кубик {ADDRESS}...")
-            device = await BleakScanner.find_device_by_address(ADDRESS, timeout=10.0)
-            if not device:
-                await asyncio.sleep(2)
-                continue
-
-            print(f"✅ Нашел! Подключаюсь...")
-            async with BleakClient(device, timeout=15.0) as client:
+            print(f"Попытка подключения к {ADDRESS}...")
+            # Прямой коннект стабильнее в Docker с host mode
+            async with BleakClient(ADDRESS, timeout=20.0) as client:
+                print("🔒 Коннект стабилен! Жду движений...")
                 await client.start_notify(NOTIFY_UUID, guard.notify_handler)
+                
                 while client.is_connected:
                     await asyncio.sleep(1)
+                    
         except Exception as e:
-            print(f"🔴 Ошибка: {e}")
+            if "not found" in str(e).lower():
+                print(f"💤 Куб не найден. Тряхни его...")
+            else:
+                print(f"🔴 Ошибка: {e}")
             await asyncio.sleep(5)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
