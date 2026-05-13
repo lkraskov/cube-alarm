@@ -11,24 +11,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Конфиг из .env
+# Конфиг
 TG_TOKEN = os.getenv("TG_TOKEN")
 USER_ID  = int(os.getenv("USER_ID", 0))
 ADDRESS  = os.getenv("CUBE_ADDRESS", "AB:12:34:5D:32:6D").upper()
 NOTIFY_UUID = "28be4cb6-cd67-11e9-a32f-2a2ae2dbcce4"
-TIMEOUT  = int(os.getenv("ANTISPAM_TIMEOUT", 20))
+TIMEOUT  = int(os.getenv("ANTISPAM_TIMEOUT", 15))
 
 bot = Bot(token=TG_TOKEN)
+lz = lzstring.LZString()
 
-# Ключи дешифровки GAN
+# Ключи GAN
 KEYS = [
     "NoRgnAHANATADDWJYwMxQOxiiEcfYgSK6Hpr4TYCs0IG1OEAbDszALpA",
     "NoNg7ANATFIQnARmogLBRUCs0oAYN8U5J45EQBmFADg0oJAOSlUQF0g",
     "NoRgNATGBs1gLABgQTjCeBWSUDsYBmKbCeMADjNnXxHIoIF0g",
     "NoRg7ANAzBCsAMEAsioxBEIAc0Cc0ATJkgSIYhXIjhMQGxgC6QA",
 ]
-
-lz = lzstring.LZString()
 
 def make_key_iv(mac_str):
     mac = [int(x, 16) for x in mac_str.split(':')]
@@ -50,76 +49,66 @@ def decode_data(data, key, iv):
     for i in range(16): ret[i] = block[i] ^ iv[i]
     return ret
 
-class CubeGuard:
+class HybridGuard:
     def __init__(self):
         self.last_alert = 0
-        self.white_solved = False
+        self.is_connecting = False
         self.key, self.iv = make_key_iv(ADDRESS)
-        # Цвета для дизайна
-        self.cube_colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
-        print(f"Ключи созданы для {ADDRESS}")
+        self.colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
 
-    async def notify_handler(self, sender, data):
-        dec = decode_data(data, self.key, self.iv)
-        bits = ''.join(bin(b + 256)[3:] for b in dec)
-        mode = int(bits[0:4], 2)
-        now_ts = asyncio.get_event_loop().time()
+    async def check_solve_state(self):
+        """Пытается подключиться и проверить состояние граней"""
+        if self.is_connecting: return
+        self.is_connecting = True
+        
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 Попытка анализа состояния...")
+        try:
+            async with BleakClient(ADDRESS, timeout=10.0) as client:
+                # Ждем пакет данных (обычно прилетает сразу после коннекта)
+                def internal_callback(sender, data):
+                    dec = decode_data(data, self.key, self.iv)
+                    bits = ''.join(bin(b + 256)[3:] for b in dec)
+                    if int(bits[0:4], 2) == 4: # Mode Facelets
+                        facelets = [int(bits[16 + i*3 : 19 + i*3], 2) for i in range(54)]
+                        # Проверка на полную сборку (все грани по 9 одного цвета)
+                        is_solved = all(len(set(facelets[i*9 : (i+1)*9])) == 1 for i in range(6))
+                        if is_solved:
+                            asyncio.create_task(bot.send_message(USER_ID, "🎉 **Congrats, cube solved!!**", parse_mode="Markdown"))
+                            print("🏆 Куб собран!")
 
-        # Режим 2: Поворот грани
-        if mode == 2:
-            if now_ts - self.last_alert > TIMEOUT:
-                self.last_alert = now_ts
-                c = random.sample(self.cube_colors, k=4)
-                # Дизайн как на твоих скринах
-                text = (
-                    f"{c[0]}{c[1]} movement\n"
-                    f"{c[2]}{c[3]} detected!\n"
-                    f" `-88 dBm` 📶"
-                )
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 Движение!")
-                try:
-                    await bot.send_message(chat_id=USER_ID, text=text, parse_mode="Markdown")
-                except Exception as e:
-                    print(f"Ошибка ТГ: {e}")
+                await client.start_notify(NOTIFY_UUID, internal_callback)
+                await asyncio.sleep(3) # Даем время на получение данных
+                await client.stop_notify(NOTIFY_UUID)
+        except Exception as e:
+            print(f"Ошибка анализа: {e}")
+        finally:
+            self.is_connecting = False
 
-        # Режим 4: Состояние куба
-        elif mode == 4:
-            # Извлекаем состояние всех 54 наклеек
-            facelets = [int(bits[16 + i*3 : 19 + i*3], 2) for i in range(54)]
-            # Проверяем первые 9 (белая грань). 0 - обычно белый цвет.
-            white_side = facelets[0:9]
-            if len(set(white_side)) == 1 and white_side[0] == 0:
-                if not self.white_solved:
-                    self.white_solved = True
-                    print("⚪ Белая грань собрана!")
-                    await bot.send_message(chat_id=USER_ID, text="⚪ **White side solved!**\nКрасава! 🏆")
-            else:
-                self.white_solved = False
+    async def detection_callback(self, device, adv_data):
+        if device.address.upper() == ADDRESS:
+            now = asyncio.get_event_loop().time()
+            # 1. МГНОВЕННОЕ УВЕДОМЛЕНИЕ
+            if now - self.last_alert > TIMEOUT:
+                self.last_alert = now
+                c = random.sample(self.colors, k=4)
+                text = f"{c[0]}{c[1]} movement\n{c[2]}{c[3]} detected!\n `{adv_data.rssi} dBm` 📶"
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚨 ALERT!")
+                asyncio.create_task(bot.send_message(USER_ID, text, parse_mode="Markdown"))
+                
+                # 2. ЗАПУСК АНАЛИЗА (ФОНОМ)
+                asyncio.create_task(self.check_solve_state())
 
 async def main():
-    guard = CubeGuard()
-    print(f"--- ОХРАНА ЗАПУЩЕНА (РЕЖИМ КЛИЕНТА) ---")
+    guard = HybridGuard()
+    print(f"--- ГИБРИДНАЯ ОХРАНА ЗАПУЩЕНА ({ADDRESS}) ---")
     
-    while True:
-        try:
-            print(f"Попытка подключения к {ADDRESS}...")
-            # Прямой коннект стабильнее в Docker с host mode
-            async with BleakClient(ADDRESS, timeout=20.0) as client:
-                print("🔒 Коннект стабилен! Жду движений...")
-                await client.start_notify(NOTIFY_UUID, guard.notify_handler)
-                
-                while client.is_connected:
-                    await asyncio.sleep(1)
-                    
-        except Exception as e:
-            if "not found" in str(e).lower():
-                print(f"💤 Куб не найден. Тряхни его...")
-            else:
-                print(f"🔴 Ошибка: {e}")
-            await asyncio.sleep(5)
+    scanner = BleakScanner(detection_callback=guard.detection_callback)
+    await scanner.start()
+    try:
+        while True:
+            await asyncio.sleep(1)
+    finally:
+        await scanner.stop()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(main())
