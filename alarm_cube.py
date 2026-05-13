@@ -15,12 +15,11 @@ TG_TOKEN = os.getenv("TG_TOKEN")
 USER_ID  = int(os.getenv("USER_ID", 0))
 ADDRESS  = os.getenv("CUBE_ADDRESS", "AB:12:34:5D:32:6D").upper()
 NOTIFY_UUID = "28be4cb6-cd67-11e9-a32f-2a2ae2dbcce4"
-TIMEOUT  = 15 
+TIMEOUT  = 30 # Увеличил паузу между алертами
 
 bot = Bot(token=TG_TOKEN)
 lz = lzstring.LZString()
 
-# Ключи
 KEYS = ["NoRgnAHANATADDWJYwMxQOxiiEcfYgSK6Hpr4TYCs0IG1OEAbDszALpA", 
         "NoNg7ANATFIQnARmogLBRUCs0oAYN8U5J45EQBmFADg0oJAOSlUQF0g", 
         "NoRgNATGBs1gLABgQTjCeBWSUDsYBmKbCeMADjNnXxHIoIF0g", 
@@ -50,40 +49,41 @@ class HybridGuard:
     def __init__(self):
         self.last_alert = 0
         self.scanner = None
+        self.is_busy = False # Глобальный флаг занятости
         self.key, self.iv = make_key_iv(ADDRESS)
         self.colors = ["⬜", "🟨", "🟥", "🟧", "🟦", "🟩"]
 
     async def check_solve_state(self):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛑 Стопаю сканер для коннекта...")
+        self.is_busy = True
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛑 Пауза сканера...")
         await self.scanner.stop()
-        await asyncio.sleep(1.0) # Пауза на "остывание" адаптера
+        await asyncio.sleep(2.0) 
 
         try:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔗 Соединяюсь с {ADDRESS}...")
-            async with BleakClient(ADDRESS, timeout=10.0) as client:
-                print(f"✅ Коннект! Поиск сервисов...")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔗 Коннект...")
+            async with BleakClient(ADDRESS, timeout=12.0) as client:
+                print(f"✅ Внутри! Проверяю грани...")
                 
                 def callback(sender, data):
                     dec = decode_data(data, self.key, self.iv)
                     bits = ''.join(bin(b + 256)[3:] for b in dec)
                     if int(bits[0:4], 2) == 4:
-                        facelets = [int(bits[16 + i*3 : 19 + i*3], 2) for i in range(54)]
-                        if all(len(set(facelets[i*9 : (i+1)*9])) == 1 for i in range(6)):
-                            print("🏆 СОБРАН!")
+                        f = [int(bits[16 + i*3 : 19 + i*3], 2) for i in range(54)]
+                        if all(len(set(f[i*9 : (i+1)*9])) == 1 for i in range(6)):
                             asyncio.create_task(bot.send_message(USER_ID, "🎉 **Congrats, cube solved!!**"))
 
                 await client.start_notify(NOTIFY_UUID, callback)
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(4.0)
                 await client.stop_notify(NOTIFY_UUID)
-                print("🔌 Анализ завершен, отключаюсь.")
         except Exception as e:
-            print(f"🔴 Ошибка анализа: {e}")
+            print(f"🔴 Мимо: {e}")
         finally:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] ♻️ Возвращаю сканер в строй...")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ♻️ Рестарт сканера...")
             await self.scanner.start()
+            self.is_busy = False # Освобождаем
 
     async def detection_callback(self, device, adv_data):
-        if device.address.upper() == ADDRESS:
+        if device.address.upper() == ADDRESS and not self.is_busy:
             now = asyncio.get_event_loop().time()
             if now - self.last_alert > TIMEOUT:
                 self.last_alert = now
@@ -95,16 +95,10 @@ class HybridGuard:
 
 async def main():
     guard = HybridGuard()
-    print(f"--- ГИБРИДНАЯ ОХРАНА v3 (Verbose Debug) ---")
-    
+    print(f"--- ОХРАНА v4 (Anti-Storm) ---")
     guard.scanner = BleakScanner(detection_callback=guard.detection_callback)
     await guard.scanner.start()
-    
-    try:
-        while True:
-            await asyncio.sleep(1)
-    finally:
-        await guard.scanner.stop()
+    while True: await asyncio.sleep(1)
 
 if __name__ == "__main__":
     asyncio.run(main())
