@@ -17,8 +17,6 @@ ADDRESS  = os.getenv("CUBE_ADDRESS", "AB:12:34:5D:32:6D").upper()
 NOTIFY_UUID = "28be4cb6-cd67-11e9-a32f-2a2ae2dbcce4"
 # Минимальный интервал между уведомлениями о движении (секунды)
 MOTION_COOLDOWN = 600  # 10 минут
-# Минимальный интервал между проверками собранности грани (секунды)
-SOLVE_COOLDOWN = 600   # 10 минут
 
 bot = Bot(token=TG_TOKEN)
 lz = lzstring.LZString()
@@ -65,14 +63,9 @@ def check_face_solved(facelets, face_index):
     start = face_index * 9
     return len(set(facelets[start:start+9])) == 1
 
-def get_face_color(facelets, face_index):
-    """Возвращает цвет центрального стикера грани (индекс 4 в группе из 9)."""
-    return facelets[face_index * 9 + 4]
-
 class HybridGuard:
     def __init__(self):
         self.last_motion_alert = 0
-        self.last_solve_check = 0
         self.scanner = None
         self.is_busy = False
         self.key, self.iv = make_key_iv(ADDRESS)
@@ -89,33 +82,62 @@ class HybridGuard:
         try:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔗 Коннект...")
             async with BleakClient(ADDRESS, timeout=12.0) as client:
-                print(f"✅ Внутри! Проверяю грани...")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Подключился! Подписываюсь на нотификации...")
                 
+                notify_events = []
+
                 def callback(sender, data):
-                    dec = decode_data(data, self.key, self.iv)
-                    facelets = parse_facelets(dec)
-                    if facelets is None:
-                        return
+                    try:
+                        ts = datetime.now().strftime('%H:%M:%S')
+                        print(f"[{ts}] 📦 RAW data ({len(data)} байт): {data.hex()}")
+                        
+                        dec = decode_data(data, self.key, self.iv)
+                        print(f"[{ts}] 🔓 DEC data ({len(dec)} байт): {bytes(dec).hex()}")
+                        
+                        bits = ''.join(bin(b + 256)[3:] for b in dec)
+                        packet_type = int(bits[0:4], 2)
+                        print(f"[{ts}] 📊 Первые 32 бита: {bits[:32]}, тип пакета: {packet_type}")
+                        
+                        facelets = parse_facelets(dec)
+                        if facelets is None:
+                            print(f"[{ts}] ⏭ Не state-пакет (тип {packet_type}), пропускаю")
+                            return
 
-                    # Проверка полной сборки куба
-                    if all(len(set(facelets[i*9 : (i+1)*9])) == 1 for i in range(6)):
-                        asyncio.create_task(bot.send_message(USER_ID, "🎉 **Congrats, cube solved!!**"))
-                        return
+                        print(f"[{ts}] 🎯 State-пакет! 54 стикера: {facelets}")
+                        notify_events.append(facelets)
+                        
+                        # Проверка каждой грани на собранность
+                        for face_idx in range(6):
+                            colors_in_face = facelets[face_idx*9 : (face_idx+1)*9]
+                            unique_colors = set(colors_in_face)
+                            center_color = colors_in_face[4]
+                            print(f"[{ts}]   Грань {face_idx} ({FACE_NAMES[face_idx]}): "
+                                  f"центр={EMOJI_COLORS[center_color]}, "
+                                  f"цвета={colors_in_face}, "
+                                  f"уникальных={len(unique_colors)}")
+                            
+                            if len(unique_colors) == 1 and face_idx not in self.notified_solved_faces:
+                                color_name = FACE_NAMES[face_idx]
+                                self.notified_solved_faces.add(face_idx)
+                                msg = f"✅ **{color_name} face solved!**"
+                                print(f"[{ts}] ✅ {msg}")
+                                asyncio.create_task(bot.send_message(USER_ID, msg))
 
-                    # Проверка каждой грани на собранность
-                    for face_idx in range(6):
-                        if check_face_solved(facelets, face_idx) and face_idx not in self.notified_solved_faces:
-                            color_name = FACE_NAMES[face_idx]
-                            self.notified_solved_faces.add(face_idx)
-                            msg = f"✅ **{color_name} face solved!**"
-                            print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
-                            asyncio.create_task(bot.send_message(USER_ID, msg))
+                        # Проверка полной сборки куба
+                        if all(len(set(facelets[i*9 : (i+1)*9])) == 1 for i in range(6)):
+                            print(f"[{ts}] 🎉 Куб полностью собран!")
+                            asyncio.create_task(bot.send_message(USER_ID, "🎉 **Congrats, cube solved!!**"))
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔴 Ошибка в callback: {e}")
 
                 await client.start_notify(NOTIFY_UUID, callback)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 👂 Слушаю нотификации 4 секунды...")
                 await asyncio.sleep(4.0)
                 await client.stop_notify(NOTIFY_UUID)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛑 Нотификации остановлены. "
+                      f"Получено {len(notify_events)} state-пакетов")
         except Exception as e:
-            print(f"🔴 Мимо: {e}")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔴 Мимо: {e}")
         finally:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] ♻️ Рестарт сканера...")
             await self.scanner.start()
@@ -148,7 +170,7 @@ class HybridGuard:
             # После движения проверяем состояние куба
             await self.check_solve_state()
         except Exception as e:
-            print(f"🔴 Ошибка: {e}")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔴 Ошибка: {e}")
             self.is_busy = False
 
 async def main():
