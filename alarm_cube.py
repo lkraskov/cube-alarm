@@ -20,7 +20,7 @@ NOTIFY_UUID = "28be4cb6-cd67-11e9-a32f-2a2ae2dbcce4"
 WRITE_UUID  = "28be4a4a-cd67-11e9-a32f-2a2ae2dbcce4"
 
 # Minimal interval between motion notifications (seconds).
-MOTION_COOLDOWN = 600  # 10 minutes
+MOTION_COOLDOWN = int(os.getenv("MOTION_COOLDOWN", 180))  # 3 minutes
 
 # Canonical solved state. Verified against this cube on 2026-07-20 after its
 # solved reference was reset in the GAN app (it then reports identity cp/ep).
@@ -290,7 +290,8 @@ def ts():
 
 async def main():
     guard = HybridGuard()
-    print("--- GUARD v8 (Instant Alert + Face Detection) ---")
+    print("--- GUARD v8.1 (Instant Alert + Face Detection) ---")
+    print(f"Motion cooldown: {MOTION_COOLDOWN}s")
     print(f"Target: {ADDRESS}")
     guard.scanner = BleakScanner(detection_callback=guard.detection_callback)
     await guard.scanner.start()
