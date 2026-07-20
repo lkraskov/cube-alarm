@@ -143,6 +143,11 @@ def parse_facelets(dec):
     return render_facelets(cp, co, ep, eo)
 
 
+def alert_text(squares, rssi):
+    return (f"{squares[0]}{squares[1]} movement\n"
+            f"{squares[2]}{squares[3]} detected!\n `{rssi} dBm` \U0001f4f6")
+
+
 def face_solved(facelets, face_index):
     """True if the given face matches the calibrated solved reference."""
     a = face_index * 9
@@ -159,6 +164,9 @@ class HybridGuard:
         # Faces already reported as solved, to avoid repeat notifications.
         self.notified_solved_faces = set()
         self.notified_full_solved = False
+        # White-face status from the last successful read, used to decorate the
+        # instant alert before the current state has been read.
+        self.last_white_ok = False
 
     async def read_facelets(self, client):
         """Subscribe, ask the cube for its state, return the facelet string (or None)."""
@@ -248,15 +256,28 @@ class HybridGuard:
         try:
             rssi = adv_data.rssi
             print(f"[{ts()}] ALERT!")
-            # Read the state first so the alert can show white squares when the
-            # white face is solved, instead of the usual random colours.
+            # Send the alert immediately — reading the cube state takes seconds
+            # and an alarm must not be delayed by it. Decorate using the white
+            # status from the previous read, then correct the message below if
+            # the fresh state disagrees.
+            guess_white = self.last_white_ok
+            squares = ["⬜"] * 4 if guess_white else random.sample(self.colors, k=4)
+            msg = await bot.send_message(USER_ID, alert_text(squares, rssi), parse_mode="Markdown")
+
             facelets = await self.check_solve_state()
-            white_ok = facelets is not None and face_solved(facelets, WHITE_FACE)
-            c = ["⬜"] * 4 if white_ok else random.sample(self.colors, k=4)
-            text = f"{c[0]}{c[1]} movement\n{c[2]}{c[3]} detected!\n `{rssi} dBm` \U0001f4f6"
-            await bot.send_message(USER_ID, text, parse_mode="Markdown")
-            if facelets is not None:
-                await self.report_solved(facelets)
+            if facelets is None:
+                return
+            white_ok = face_solved(facelets, WHITE_FACE)
+            self.last_white_ok = white_ok
+            if white_ok != guess_white:
+                squares = ["⬜"] * 4 if white_ok else random.sample(self.colors, k=4)
+                try:
+                    await bot.edit_message_text(
+                        chat_id=USER_ID, message_id=msg.message_id,
+                        text=alert_text(squares, rssi), parse_mode="Markdown")
+                except Exception as e:
+                    print(f"[{ts()}] Could not edit alert: {e}")
+            await self.report_solved(facelets)
         except Exception as e:
             print(f"[{ts()}] Error: {e}")
         finally:
@@ -269,7 +290,7 @@ def ts():
 
 async def main():
     guard = HybridGuard()
-    print("--- GUARD v7 (Cooldown + Face Detection) ---")
+    print("--- GUARD v8 (Instant Alert + Face Detection) ---")
     print(f"Target: {ADDRESS}")
     guard.scanner = BleakScanner(detection_callback=guard.detection_callback)
     await guard.scanner.start()
