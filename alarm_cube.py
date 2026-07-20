@@ -269,7 +269,7 @@ def ts():
 
 async def main():
     guard = HybridGuard()
-    print("--- GUARD v6 (Cooldown + Calibrated Face Detection) ---")
+    print("--- GUARD v7 (Cooldown + Face Detection) ---")
     print(f"Target: {ADDRESS}")
     guard.scanner = BleakScanner(detection_callback=guard.detection_callback)
     await guard.scanner.start()
