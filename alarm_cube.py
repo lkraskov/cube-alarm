@@ -22,15 +22,20 @@ WRITE_UUID  = "28be4a4a-cd67-11e9-a32f-2a2ae2dbcce4"
 # Minimal interval between motion notifications (seconds).
 MOTION_COOLDOWN = 600  # 10 minutes
 
-# Calibrated solved reference for THIS physical cube (captured 2026-07-20).
-# The cube's internal "solved" frame is offset by a D-layer quarter turn, so a
-# fully solved cube does not decode to the textbook UUUU...BBBB string. We therefore
-# compare against the real captured solved state instead of the theoretical one.
-SOLVED_REF = "UUUUUUUUURRRRRRFBLFFFFFFRRLDDDDDDDDDLLLLLLBFFBBBBBBBLR"
+# Canonical solved state. Verified against this cube on 2026-07-20 after its
+# solved reference was reset in the GAN app (it then reports identity cp/ep).
+SOLVED_REF = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
 
-# Face windows (index -> label) that are clean in the reference and therefore
-# reliably detectable on their own. U = white (top), D = yellow (bottom).
-CLEAN_FACES = {0: "⬜ White", 3: "\U0001f7e8 Yellow"}
+# Face index (U R F D L B) -> label. Standard scheme with white on top.
+FACE_NAMES = {
+    0: "⬜ White",
+    1: "\U0001f7e5 Red",
+    2: "\U0001f7e9 Green",
+    3: "\U0001f7e8 Yellow",
+    4: "\U0001f7e7 Orange",
+    5: "\U0001f7e6 Blue",
+}
+WHITE_FACE = 0
 
 bot = Bot(token=TG_TOKEN)
 lz = lzstring.LZString()
@@ -78,6 +83,37 @@ def encode_data(data, key, iv):
     return ret
 
 
+FACES = "URFDLB"  # face index 0..5, also the sticker letter for that face
+
+# Standard Kociemba piece definitions. Corner i occupies CORNER_FACELETS[i] and
+# carries the colours CORNER_COLORS[i], in matching order.
+# Corners: URF UFL ULB UBR DFR DLF DBL DRB
+CORNER_FACELETS = [[8, 9, 20], [6, 18, 38], [0, 36, 47], [2, 45, 11],
+                   [29, 26, 15], [27, 44, 24], [33, 53, 42], [35, 17, 51]]
+CORNER_COLORS = [[0, 1, 2], [0, 2, 4], [0, 4, 5], [0, 5, 1],
+                 [3, 2, 1], [3, 4, 2], [3, 5, 4], [3, 1, 5]]
+EDGE_FACELETS = [[5, 10], [7, 19], [3, 37], [1, 46], [32, 16], [28, 25],
+                 [30, 43], [34, 52], [23, 12], [21, 41], [50, 39], [48, 14]]
+EDGE_COLORS = [[0, 1], [0, 2], [0, 4], [0, 5], [3, 1], [3, 2],
+               [3, 4], [3, 5], [2, 1], [2, 4], [5, 4], [5, 1]]
+
+
+def render_facelets(cp, co, ep, eo):
+    """Render permutation/orientation arrays into a 54-char URFDLB string."""
+    facelet = ['?'] * 54
+    for i, f in enumerate(FACES):
+        facelet[i * 9 + 4] = f  # centers
+    for i in range(8):
+        p, o = cp[i], co[i]
+        for j in range(3):
+            facelet[CORNER_FACELETS[i][j]] = FACES[CORNER_COLORS[p][(j + o) % 3]]
+    for i in range(12):
+        p, o = ep[i], eo[i]
+        for j in range(2):
+            facelet[EDGE_FACELETS[i][j]] = FACES[EDGE_COLORS[p][(j + o) % 2]]
+    return ''.join(facelet)
+
+
 def parse_facelets(dec):
     """Decode a mode-4 (facelets) packet into a 54-char URFDLB string.
 
@@ -89,20 +125,6 @@ def parse_facelets(dec):
     bits = ''.join(bin(b + 256)[3:] for b in dec)
     if int(bits[0:4], 2) != 4:
         return None
-
-    faces = "URFDLB"
-    facelet = ['?'] * 54
-    for i, f in enumerate(faces):
-        facelet[i * 9 + 4] = f  # centers
-
-    corner_facelets = [[8, 9, 20], [6, 18, 38], [0, 36, 47], [2, 45, 11],
-                       [29, 26, 15], [27, 44, 24], [33, 53, 42], [35, 51, 17]]
-    corner_colors = [[0, 1, 2], [0, 2, 4], [0, 4, 5], [0, 5, 1],
-                     [3, 2, 1], [3, 1, 5], [3, 5, 4], [3, 4, 2]]
-    edge_facelets = [[5, 10], [7, 19], [3, 37], [1, 46], [32, 16], [28, 25],
-                     [30, 43], [34, 52], [23, 12], [21, 41], [50, 39], [48, 14]]
-    edge_colors = [[0, 1], [0, 2], [0, 4], [0, 5], [3, 1], [3, 2],
-                   [3, 4], [3, 5], [2, 1], [2, 4], [5, 4], [5, 1]]
 
     cp, co = [], []
     for i in range(7):
@@ -118,16 +140,7 @@ def parse_facelets(dec):
     ep.append(66 - sum(ep))
     eo.append((2 - sum(eo) % 2) % 2)
 
-    for i in range(8):
-        p, o = cp[i], co[i]
-        for j in range(3):
-            facelet[corner_facelets[i][j]] = faces[corner_colors[p][(j + o) % 3]]
-    for i in range(12):
-        p, o = ep[i], eo[i]
-        for j in range(2):
-            facelet[edge_facelets[i][j]] = faces[edge_colors[p][(j + o) % 2]]
-
-    return ''.join(facelet)
+    return render_facelets(cp, co, ep, eo)
 
 
 def face_solved(facelets, face_index):
@@ -178,7 +191,10 @@ class HybridGuard:
         return result["facelets"]
 
     async def check_solve_state(self):
-        self.is_busy = True
+        """Pause scanning, connect and read the cube state.
+
+        Returns the facelet string, or None if the state could not be read.
+        """
         print(f"[{ts()}] Pausing scanner...")
         await self.scanner.stop()
         await asyncio.sleep(2.0)
@@ -189,35 +205,35 @@ class HybridGuard:
                 facelets = await self.read_facelets(client)
                 if facelets is None:
                     print(f"[{ts()}] No state packet received.")
-                    return
-
-                print(f"[{ts()}] Facelets: {facelets}")
-
-                if facelets == SOLVED_REF:
-                    if not self.notified_full_solved:
-                        self.notified_full_solved = True
-                        self.notified_solved_faces = set(range(6))
-                        await bot.send_message(USER_ID, "\U0001f389 **Cube solved!!**", parse_mode="Markdown")
-                        print(f"[{ts()}] Cube fully solved.")
-                    return
-
-                # Cube not fully solved: reset the full-solve latch and check
-                # the individually reliable faces (white / yellow).
-                self.notified_full_solved = False
-                for idx, label in CLEAN_FACES.items():
-                    if face_solved(facelets, idx):
-                        if idx not in self.notified_solved_faces:
-                            self.notified_solved_faces.add(idx)
-                            await bot.send_message(USER_ID, f"✅ **{label} face solved!**", parse_mode="Markdown")
-                            print(f"[{ts()}] {label} face solved.")
-                    else:
-                        self.notified_solved_faces.discard(idx)
+                else:
+                    print(f"[{ts()}] Facelets: {facelets}")
+                return facelets
         except Exception as e:
             print(f"[{ts()}] State check failed: {e}")
+            return None
         finally:
             print(f"[{ts()}] Restarting scanner...")
             await self.scanner.start()
-            self.is_busy = False
+
+    async def report_solved(self, facelets):
+        """Send notifications for newly solved faces / the whole cube."""
+        if facelets == SOLVED_REF:
+            if not self.notified_full_solved:
+                self.notified_full_solved = True
+                self.notified_solved_faces = set(range(6))
+                await bot.send_message(USER_ID, "\U0001f389 **Cube solved!!**", parse_mode="Markdown")
+                print(f"[{ts()}] Cube fully solved.")
+            return
+
+        self.notified_full_solved = False
+        for idx, label in FACE_NAMES.items():
+            if face_solved(facelets, idx):
+                if idx not in self.notified_solved_faces:
+                    self.notified_solved_faces.add(idx)
+                    await bot.send_message(USER_ID, f"✅ **{label} face solved!**", parse_mode="Markdown")
+                    print(f"[{ts()}] {label} face solved.")
+            else:
+                self.notified_solved_faces.discard(idx)
 
     async def detection_callback(self, device, adv_data):
         if device.address.upper() != ADDRESS:
@@ -230,13 +246,20 @@ class HybridGuard:
         self.is_busy = True
         self.last_motion_alert = now
         try:
-            c = random.sample(self.colors, k=4)
-            text = f"{c[0]}{c[1]} movement\n{c[2]}{c[3]} detected!\n `{adv_data.rssi} dBm` \U0001f4f6"
+            rssi = adv_data.rssi
             print(f"[{ts()}] ALERT!")
+            # Read the state first so the alert can show white squares when the
+            # white face is solved, instead of the usual random colours.
+            facelets = await self.check_solve_state()
+            white_ok = facelets is not None and face_solved(facelets, WHITE_FACE)
+            c = ["⬜"] * 4 if white_ok else random.sample(self.colors, k=4)
+            text = f"{c[0]}{c[1]} movement\n{c[2]}{c[3]} detected!\n `{rssi} dBm` \U0001f4f6"
             await bot.send_message(USER_ID, text, parse_mode="Markdown")
-            await self.check_solve_state()
+            if facelets is not None:
+                await self.report_solved(facelets)
         except Exception as e:
             print(f"[{ts()}] Error: {e}")
+        finally:
             self.is_busy = False
 
 
