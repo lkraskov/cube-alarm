@@ -35,7 +35,8 @@ FACE_NAMES = {
     4: "\U0001f7e7 Orange",
     5: "\U0001f7e6 Blue",
 }
-WHITE_FACE = 0
+WHITE_FACE = 0   # U
+YELLOW_FACE = 3  # D
 
 bot = Bot(token=TG_TOKEN)
 lz = lzstring.LZString()
@@ -148,6 +149,20 @@ def alert_text(squares, rssi):
             f"{squares[2]}{squares[3]} detected!\n `{rssi} dBm` \U0001f4f6")
 
 
+def solved_squares(facelets):
+    """Four coloured squares only if a signature face is solved, else None.
+
+    White squares iff the white face is solved, yellow iff the yellow face is
+    solved (white wins if both). Any other case returns None so the alert keeps
+    its random colours.
+    """
+    if face_solved(facelets, WHITE_FACE):
+        return ["⬜"] * 4
+    if face_solved(facelets, YELLOW_FACE):
+        return ["\U0001f7e8"] * 4
+    return None
+
+
 def face_solved(facelets, face_index):
     """True if the given face matches the calibrated solved reference."""
     a = face_index * 9
@@ -164,9 +179,6 @@ class HybridGuard:
         # Faces already reported as solved, to avoid repeat notifications.
         self.notified_solved_faces = set()
         self.notified_full_solved = False
-        # White-face status from the last successful read, used to decorate the
-        # instant alert before the current state has been read.
-        self.last_white_ok = False
 
     async def read_facelets(self, client):
         """Subscribe, ask the cube for its state, return the facelet string (or None)."""
@@ -256,25 +268,23 @@ class HybridGuard:
         try:
             rssi = adv_data.rssi
             print(f"[{ts()}] ALERT!")
-            # Send the alert immediately — reading the cube state takes seconds
-            # and an alarm must not be delayed by it. Decorate using the white
-            # status from the previous read, then correct the message below if
-            # the fresh state disagrees.
-            guess_white = self.last_white_ok
-            squares = ["⬜"] * 4 if guess_white else random.sample(self.colors, k=4)
-            msg = await bot.send_message(USER_ID, alert_text(squares, rssi), parse_mode="Markdown")
+            # Send the alert immediately with random cube colours — reading the
+            # cube state takes seconds and an alarm must not be delayed by it.
+            random_squares = random.sample(self.colors, k=4)
+            msg = await bot.send_message(USER_ID, alert_text(random_squares, rssi), parse_mode="Markdown")
 
+            # Read the actual state; only then, if a signature face is really
+            # solved, upgrade the squares (white for white, yellow for yellow).
+            # Never shown speculatively, so it can't be a false positive.
             facelets = await self.check_solve_state()
             if facelets is None:
                 return
-            white_ok = face_solved(facelets, WHITE_FACE)
-            self.last_white_ok = white_ok
-            if white_ok != guess_white:
-                squares = ["⬜"] * 4 if white_ok else random.sample(self.colors, k=4)
+            solved = solved_squares(facelets)
+            if solved is not None:
                 try:
                     await bot.edit_message_text(
                         chat_id=USER_ID, message_id=msg.message_id,
-                        text=alert_text(squares, rssi), parse_mode="Markdown")
+                        text=alert_text(solved, rssi), parse_mode="Markdown")
                 except Exception as e:
                     print(f"[{ts()}] Could not edit alert: {e}")
             await self.report_solved(facelets)
@@ -290,7 +300,7 @@ def ts():
 
 async def main():
     guard = HybridGuard()
-    print("--- GUARD v8.1 (Instant Alert + Face Detection) ---")
+    print("--- GUARD v8.2 (Instant Alert + Face Detection) ---")
     print(f"Motion cooldown: {MOTION_COOLDOWN}s")
     print(f"Target: {ADDRESS}")
     guard.scanner = BleakScanner(detection_callback=guard.detection_callback)
